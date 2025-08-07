@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/use-toast"
-import { Loader2, Plus, X } from "lucide-react"
+import { Loader2, Plus, X, Play, Square, Zap } from 'lucide-react'
 import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
 
 interface MultiWebhookSenderProps {
   initialWebhook: string
@@ -18,6 +19,14 @@ export default function MultiWebhookSender({ initialWebhook }: MultiWebhookSende
   const [message, setMessage] = useState("")
   const [sending, setSending] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
+  
+  // Spam functionality state
+  const [isSpamming, setIsSpamming] = useState(false)
+  const [spamDelay, setSpamDelay] = useState("100")
+  const [spamCount, setSpamCount] = useState("0") // 0 = unlimited
+  const [currentSpamCount, setCurrentSpamCount] = useState(0)
+  const [spamStats, setSpamStats] = useState({ sent: 0, failed: 0 })
+  const spamIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const handleAddWebhook = () => {
     if (newWebhook && !webhooks.includes(newWebhook)) {
@@ -111,9 +120,85 @@ export default function MultiWebhookSender({ initialWebhook }: MultiWebhookSende
     }
   }
 
+  const startSpamming = () => {
+    if (!message || webhooks.length === 0) return
+    
+    setIsSpamming(true)
+    setCurrentSpamCount(0)
+    setSpamStats({ sent: 0, failed: 0 })
+    
+    const delay = Math.max(50, parseInt(spamDelay)) // Minimum 50ms delay
+    const maxCount = parseInt(spamCount)
+    
+    const spamFunction = async () => {
+      if (maxCount > 0 && currentSpamCount >= maxCount) {
+        stopSpamming()
+        return
+      }
+      
+      // Send to all webhooks simultaneously
+      const promises = webhooks.map(async (webhook) => {
+        try {
+          const response = await fetch("/api/send-webhook", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              webhookUrl: webhook,
+              messages: [{ content: message }],
+            }),
+          })
+          
+          if (response.ok) {
+            setSpamStats(prev => ({ ...prev, sent: prev.sent + 1 }))
+          } else {
+            setSpamStats(prev => ({ ...prev, failed: prev.failed + 1 }))
+          }
+        } catch (error) {
+          setSpamStats(prev => ({ ...prev, failed: prev.failed + 1 }))
+          console.error(`Error sending to webhook ${webhook}:`, error)
+        }
+      })
+      
+      await Promise.allSettled(promises)
+      setCurrentSpamCount(prev => prev + 1)
+    }
+    
+    // Initial send
+    spamFunction()
+    
+    // Set up interval for continuous spamming
+    spamIntervalRef.current = setInterval(spamFunction, delay)
+  }
+
+  const stopSpamming = () => {
+    setIsSpamming(false)
+    if (spamIntervalRef.current) {
+      clearInterval(spamIntervalRef.current)
+      spamIntervalRef.current = null
+    }
+    
+    toast({
+      title: "Spam Stopped",
+      description: `Completed ${currentSpamCount} spam cycles. Sent: ${spamStats.sent}, Failed: ${spamStats.failed}`,
+    })
+  }
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (spamIntervalRef.current) {
+        clearInterval(spamIntervalRef.current)
+      }
+    }
+  }, [])
+
   return (
-    <div className="space-y-4 p-4">
-      <div className="space-y-2">
+    <div className="space-y-6 p-4">
+      {/* Webhook Management */}
+      <div className="space-y-3">
+        <h3 className="text-lg font-semibold text-white/90">Webhook Management</h3>
         <div className="flex gap-2">
           <Input
             value={newWebhook}
@@ -135,9 +220,12 @@ export default function MultiWebhookSender({ initialWebhook }: MultiWebhookSende
         </Button>
       </div>
 
+      {/* Active Webhooks */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-white/80">Active Webhooks</label>
-        <div className="flex flex-wrap gap-2">
+        <label className="block text-sm font-medium text-white/80">
+          Active Webhooks ({webhooks.length})
+        </label>
+        <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
           {webhooks.map((webhook, index) => (
             <Badge key={index} variant="secondary" className="bg-white/10 text-white hover:bg-white/20">
               {webhook.substring(0, 20)}...
@@ -149,21 +237,119 @@ export default function MultiWebhookSender({ initialWebhook }: MultiWebhookSende
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-2 text-white/80">Message</label>
-          <Textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            required
-            placeholder="Enter your message here"
-            className="bg-black/50 border-white/10 text-white placeholder:text-white/30 min-h-[100px]"
-          />
+      <Separator className="bg-white/10" />
+
+      {/* Message Input */}
+      <div>
+        <label className="block text-sm font-medium mb-2 text-white/80">Message</label>
+        <Textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          required
+          placeholder="Enter your message here"
+          className="bg-black/50 border-white/10 text-white placeholder:text-white/30 min-h-[100px]"
+        />
+      </div>
+
+      {/* Spam Controls */}
+      <div className="space-y-4 p-4 border border-red-500/20 rounded-lg bg-red-500/5">
+        <div className="flex items-center gap-2">
+          <Zap className="w-5 h-5 text-red-400" />
+          <h3 className="text-lg font-semibold text-red-400">SPAM MODE</h3>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2 text-white/80">
+              Delay (ms) - Min: 50ms
+            </label>
+            <Input
+              type="number"
+              min="50"
+              value={spamDelay}
+              onChange={(e) => setSpamDelay(e.target.value)}
+              className="bg-black/50 border-white/10 text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2 text-white/80">
+              Max Count (0 = Unlimited)
+            </label>
+            <Input
+              type="number"
+              min="0"
+              value={spamCount}
+              onChange={(e) => setSpamCount(e.target.value)}
+              className="bg-black/50 border-white/10 text-white"
+            />
+          </div>
         </div>
 
+        {/* Spam Status */}
+        {isSpamming && (
+          <div className="p-3 bg-red-600/20 border border-red-500/30 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-red-400 font-semibold">🚨 SPAMMING ACTIVE</span>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                <span className="text-xs text-white/60">LIVE</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-white/60">Cycles:</span>
+                <span className="ml-2 text-white font-mono">{currentSpamCount}</span>
+                {parseInt(spamCount) > 0 && (
+                  <span className="text-white/60">/{spamCount}</span>
+                )}
+              </div>
+              <div>
+                <span className="text-white/60">Rate:</span>
+                <span className="ml-2 text-white font-mono">{Math.round(1000 / parseInt(spamDelay))}/s</span>
+              </div>
+              <div>
+                <span className="text-green-400">Sent:</span>
+                <span className="ml-2 text-green-400 font-mono">{spamStats.sent}</span>
+              </div>
+              <div>
+                <span className="text-red-400">Failed:</span>
+                <span className="ml-2 text-red-400 font-mono">{spamStats.failed}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Spam Controls */}
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            onClick={startSpamming}
+            disabled={isSpamming || !message || webhooks.length === 0}
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+          >
+            <Play className="w-4 h-4 mr-2" />
+            {isSpamming ? "Spamming..." : "Start Spam"}
+          </Button>
+          <Button
+            type="button"
+            onClick={stopSpamming}
+            disabled={!isSpamming}
+            variant="outline"
+            className="flex-1 border-red-500 text-red-500 hover:bg-red-500/10"
+          >
+            <Square className="w-4 h-4 mr-2" />
+            Stop Spam
+          </Button>
+        </div>
+      </div>
+
+      <Separator className="bg-white/10" />
+
+      {/* Single Send */}
+      <form onSubmit={handleSubmit}>
         <Button
           type="submit"
-          disabled={sending || webhooks.length === 0}
+          disabled={sending || webhooks.length === 0 || isSpamming}
           className="w-full bg-white text-black hover:bg-white/90"
         >
           {sending ? (
@@ -173,7 +359,7 @@ export default function MultiWebhookSender({ initialWebhook }: MultiWebhookSende
             </div>
           ) : (
             <>
-              Send to {webhooks.length} Webhook{webhooks.length === 1 ? "" : "s"}
+              Send Once to {webhooks.length} Webhook{webhooks.length === 1 ? "" : "s"}
             </>
           )}
         </Button>

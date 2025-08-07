@@ -3,7 +3,7 @@
 import { useState, type React } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from "lucide-react"
 
 interface WebhookVerificationProps {
   onVerified: (url: string) => void
@@ -18,24 +18,12 @@ export default function WebhookVerification({ onVerified }: WebhookVerificationP
     setVerifying(true)
 
     try {
-      const response = await fetch('/api/verify-webhook', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ webhookUrl }),
-      })
-
-      const data = await response.json()
-      
-      if (data.success) {
+      const response = await fetch(webhookUrl)
+      if (response.ok) {
         onVerified(webhookUrl)
-      } else {
-        throw new Error(data.error || 'Failed to verify webhook')
       }
     } catch (error) {
       console.error("Failed to verify webhook:", error)
-      // You could add a toast notification here for better UX
     } finally {
       setVerifying(false)
     }
