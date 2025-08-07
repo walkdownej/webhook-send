@@ -189,11 +189,11 @@ export default function WebhookSender({ webhookUrl, onWebhookDeleted }: WebhookS
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2 text-white/80">Repeat Count (1-50)</label>
+              <label className="block text-sm font-medium mb-2 text-white/80">Repeat Count (1-10000)</label>
               <Input
                 type="number"
                 min="1"
-                max="50"
+                max="10000"
                 value={repeatCount}
                 onChange={(e) => setRepeatCount(e.target.value)}
                 required
